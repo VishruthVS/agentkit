@@ -9,7 +9,7 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-
+wallet_data.txt
 # testing
 /coverage
 

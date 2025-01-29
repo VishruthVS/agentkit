@@ -53,11 +53,10 @@ const cdp_agentkit_core_1 = require("@coinbase/cdp-agentkit-core");
 const cdp_langchain_1 = require("@coinbase/cdp-langchain");
 const messages_1 = require("@langchain/core/messages");
 const langgraph_1 = require("@langchain/langgraph");
-const prebuilt_1 = require("@langchain/langgraph/prebuilt");
-const openai_1 = require("@langchain/openai");
 const dotenv = __importStar(require("dotenv"));
 const fs = __importStar(require("fs"));
 const readline = __importStar(require("readline"));
+const openai_1 = require("openai"); // Import the Hugging Face OpenAI client
 dotenv.config();
 /**
  * Validates that required environment variables are set
@@ -99,9 +98,10 @@ const WALLET_DATA_FILE = "wallet_data.txt";
 function initializeAgent() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            // Initialize LLM
-            const llm = new openai_1.ChatOpenAI({
-                model: "gpt-4o-mini",
+            // Initialize Hugging Face API client (acting as your LLM)
+            const client = new openai_1.OpenAI({
+                baseURL: "https://huggingface.co/api/inference-proxy/together",
+                apiKey: process.env.HUGGINGFACE_API_KEY || "hf_xxxxxxxxxxxxxxxxxxxxxxxx",
             });
             let walletDataStr = null;
             // Read existing wallet data if available
@@ -127,23 +127,34 @@ function initializeAgent() {
             // Store buffered conversation history in memory
             const memory = new langgraph_1.MemorySaver();
             const agentConfig = { configurable: { thread_id: "CDP AgentKit Chatbot Example!" } };
-            // Create React Agent using the LLM and CDP AgentKit tools
-            const agent = (0, prebuilt_1.createReactAgent)({
-                llm,
-                tools,
-                checkpointSaver: memory,
-                messageModifier: `
-        You are a helpful agent that can interact onchain using the Coinbase Developer Platform AgentKit. You are 
-        empowered to interact onchain using your tools. If you ever need funds, you can request them from the 
-        faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet details and request 
-        funds from the user. Before executing your first action, get the wallet details to see what network 
-        you're on. If there is a 5XX (internal) HTTP error code, ask the user to try again later. If someone 
-        asks you to do something you can't do with your currently available tools, you must say so, and 
-        encourage them to implement it themselves using the CDP SDK + Agentkit, recommend they go to 
-        docs.cdp.coinbase.com for more information. Be concise and helpful with your responses. Refrain from 
-        restating your tools' descriptions unless it is explicitly requested.
-        `,
+            // Define a method to call the Hugging Face model
+            const getChatCompletion = (userInput) => __awaiter(this, void 0, void 0, function* () {
+                try {
+                    const chatCompletion = yield client.chat.completions.create({
+                        model: "deepseek-ai/DeepSeek-V3",
+                        messages: [
+                            { role: "user", content: userInput },
+                        ],
+                        max_tokens: 500,
+                    });
+                    return chatCompletion.choices[0].message;
+                }
+                catch (error) {
+                    console.error("Error getting chat completion:", error);
+                    return "Sorry, something went wrong.";
+                }
             });
+            // Create a custom agent that uses Hugging Face for LLM
+            const agent = {
+                stream: (args, config) => __awaiter(this, void 0, void 0, function* () {
+                    const userMessage = args.messages[0].content;
+                    const aiResponse = yield getChatCompletion(userMessage);
+                    return [
+                        { agent: { messages: [{ content: aiResponse }] } },
+                        { tools: { messages: [{ content: "No tools needed." }] } },
+                    ];
+                }),
+            };
             // Save wallet data
             const exportedWallet = yield agentkit.exportWallet();
             fs.writeFileSync(WALLET_DATA_FILE, exportedWallet);
@@ -156,23 +167,29 @@ function initializeAgent() {
     });
 }
 /**
- * Run the agent autonomously with specified intervals
+ * Run the agent interactively based on user input
  *
  * @param agent - The agent executor
  * @param config - Agent configuration
- * @param interval - Time interval between actions in seconds
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function runAutonomousMode(agent_1, config_1) {
-    return __awaiter(this, arguments, void 0, function* (agent, config, interval = 10) {
+function runChatMode(agent, config) {
+    return __awaiter(this, void 0, void 0, function* () {
         var _a, e_1, _b, _c;
-        console.log("Starting autonomous mode...");
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            try {
-                const thought = "Be creative and do something interesting on the blockchain. " +
-                    "Choose an action or set of actions and execute it that highlights your abilities.";
-                const stream = yield agent.stream({ messages: [new messages_1.HumanMessage(thought)] }, config);
+        console.log("Starting chat mode... Type 'exit' to end.");
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+        const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
+        try {
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+                const userInput = yield question("\nPrompt: ");
+                if (userInput.toLowerCase() === "exit") {
+                    break;
+                }
+                const stream = yield agent.stream({ messages: [new messages_1.HumanMessage(userInput)] }, config);
                 try {
                     for (var _d = true, stream_1 = (e_1 = void 0, __asyncValues(stream)), stream_1_1; stream_1_1 = yield stream_1.next(), _a = stream_1_1.done, !_a; _d = true) {
                         _c = stream_1_1.value;
@@ -194,62 +211,6 @@ function runAutonomousMode(agent_1, config_1) {
                     }
                     finally { if (e_1) throw e_1.error; }
                 }
-                yield new Promise(resolve => setTimeout(resolve, interval * 1000));
-            }
-            catch (error) {
-                if (error instanceof Error) {
-                    console.error("Error:", error.message);
-                }
-                process.exit(1);
-            }
-        }
-    });
-}
-/**
- * Run the agent interactively based on user input
- *
- * @param agent - The agent executor
- * @param config - Agent configuration
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function runChatMode(agent, config) {
-    return __awaiter(this, void 0, void 0, function* () {
-        var _a, e_2, _b, _c;
-        console.log("Starting chat mode... Type 'exit' to end.");
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-        const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
-        try {
-            // eslint-disable-next-line no-constant-condition
-            while (true) {
-                const userInput = yield question("\nPrompt: ");
-                if (userInput.toLowerCase() === "exit") {
-                    break;
-                }
-                const stream = yield agent.stream({ messages: [new messages_1.HumanMessage(userInput)] }, config);
-                try {
-                    for (var _d = true, stream_2 = (e_2 = void 0, __asyncValues(stream)), stream_2_1; stream_2_1 = yield stream_2.next(), _a = stream_2_1.done, !_a; _d = true) {
-                        _c = stream_2_1.value;
-                        _d = false;
-                        const chunk = _c;
-                        if ("agent" in chunk) {
-                            console.log(chunk.agent.messages[0].content);
-                        }
-                        else if ("tools" in chunk) {
-                            console.log(chunk.tools.messages[0].content);
-                        }
-                        console.log("-------------------");
-                    }
-                }
-                catch (e_2_1) { e_2 = { error: e_2_1 }; }
-                finally {
-                    try {
-                        if (!_d && !_a && (_b = stream_2.return)) yield _b.call(stream_2);
-                    }
-                    finally { if (e_2) throw e_2.error; }
-                }
             }
         }
         catch (error) {
@@ -264,35 +225,63 @@ function runChatMode(agent, config) {
     });
 }
 /**
- * Choose whether to run in autonomous or chat mode based on user input
+ * Run the agent autonomously based on predefined prompts or periodic triggers
  *
- * @returns Selected mode
+ * @param agent - The agent executor
+ * @param config - Agent configuration
  */
-function chooseMode() {
+function runAutonomousMode(agent, config) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, e_2, _b, _c;
+        const predefinedMessage = "Be creative and do something interesting on the blockchain. Choose an action or set of actions and execute it that highlights your abilities.";
+        console.log("Starting autonomous mode...");
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        try {
+            // Send the predefined message to the agent
+            const stream = yield agent.stream({ messages: [new messages_1.HumanMessage(predefinedMessage)] }, config);
+            try {
+                for (var _d = true, stream_2 = __asyncValues(stream), stream_2_1; stream_2_1 = yield stream_2.next(), _a = stream_2_1.done, !_a; _d = true) {
+                    _c = stream_2_1.value;
+                    _d = false;
+                    const chunk = _c;
+                    if ("agent" in chunk) {
+                        console.log("Agent Response: ", chunk.agent.messages[0].content);
+                    }
+                    else if ("tools" in chunk) {
+                        console.log("Tool Response: ", chunk.tools.messages[0].content);
+                    }
+                    console.log("-------------------");
+                }
+            }
+            catch (e_2_1) { e_2 = { error: e_2_1 }; }
+            finally {
+                try {
+                    if (!_d && !_a && (_b = stream_2.return)) yield _b.call(stream_2);
+                }
+                finally { if (e_2) throw e_2.error; }
+            }
+            console.log("Autonomous mode finished.");
+        }
+        catch (error) {
+            console.error("Error in autonomous mode:", error);
+        }
+    });
+}
+/**
+ * Ask the user to choose the mode (interactive or autonomous) using 1 and 2
+ *
+ * @returns {Promise<string>} User's mode choice
+ */
+function askUserForMode() {
     return __awaiter(this, void 0, void 0, function* () {
         const rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout,
         });
         const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            console.log("\nAvailable modes:");
-            console.log("1. chat    - Interactive chat mode");
-            console.log("2. auto    - Autonomous action mode");
-            const choice = (yield question("\nChoose a mode (enter number or name): "))
-                .toLowerCase()
-                .trim();
-            if (choice === "1" || choice === "chat") {
-                rl.close();
-                return "chat";
-            }
-            else if (choice === "2" || choice === "auto") {
-                rl.close();
-                return "auto";
-            }
-            console.log("Invalid choice. Please try again.");
-        }
+        const mode = yield question("Choose mode: (1) Interactive (2) Autonomous: ");
+        rl.close();
+        return mode.trim();
     });
 }
 /**
@@ -302,13 +291,20 @@ function main() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const { agent, config } = yield initializeAgent();
-            const mode = yield chooseMode();
-            if (mode === "chat") {
-                yield runChatMode(agent, config);
+            let mode = yield askUserForMode();
+            while (mode !== "exit") {
+                if (mode === "1") {
+                    yield runChatMode(agent, config);
+                }
+                else if (mode === "2") {
+                    yield runAutonomousMode(agent, config);
+                }
+                else {
+                    console.log("Invalid mode. Please choose either '1' for Interactive or '2' for Autonomous.");
+                }
+                mode = yield askUserForMode();
             }
-            else {
-                yield runAutonomousMode(agent, config);
-            }
+            console.log("Exiting...");
         }
         catch (error) {
             if (error instanceof Error) {
