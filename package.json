@@ -7,13 +7,19 @@
     "start": "tsc && node index.js"
   },
   "dependencies": {
+    "@coinbase/agentkit": "^0.1.0",
+    "@coinbase/agentkit-langchain": "^0.1.0",
     "@coinbase/cdp-agentkit-core": "^0.0.14",
     "@coinbase/cdp-langchain": "^0.0.15",
+    "@coinbase/farcaster-langchain": "^0.0.1",
     "@huggingface/inference": "^3.1.4",
-    "@langchain/core": "^0.3.19",
-    "@langchain/langgraph": "^0.2.21",
+    "@langchain/core": "^0.3.37",
+    "@langchain/langgraph": "^0.2.44",
+    "@langchain/ollama": "^0.1.5",
     "@langchain/openai": "^0.3.14",
+    "axios": "^1.7.9",
     "dotenv": "^16.4.5",
+    "express": "^4.21.2",
     "langchain": "^0.3.14",
     "zod": "^3.22.4"
   },
