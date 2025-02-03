@@ -16,19 +16,28 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import * as dotenv from "dotenv";
 import * as fs from "fs";
+import cors from "cors";
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8000;
 
 app.use(express.json());
+app.use(
+  cors({
+    origin: "*",
+    methods: "GET,POST",
+  })
+);
 
 const WALLET_DATA_FILE = "wallet_data.txt";
 
 async function initializeAgent() {
   const llm = new ChatOpenAI({ model: "gpt-4o-mini" });
-  let walletDataStr = fs.existsSync(WALLET_DATA_FILE) ? fs.readFileSync(WALLET_DATA_FILE, "utf8") : null;
+  let walletDataStr = fs.existsSync(WALLET_DATA_FILE)
+    ? fs.readFileSync(WALLET_DATA_FILE, "utf8")
+    : null;
 
   const walletProvider = await CdpWalletProvider.configureWithWallet({
     apiKeyName: process.env.CDP_API_KEY_NAME,
@@ -77,7 +86,10 @@ app.post("/chat", async (req, res) => {
   if (!agentInstance) return res.status(500).send("Agent not initialized.");
   try {
     const userMessage = req.body.message;
-    const stream = await agentInstance.agent.stream({ messages: [new HumanMessage(userMessage)] }, agentInstance.config);
+    const stream = await agentInstance.agent.stream(
+      { messages: [new HumanMessage(userMessage)] },
+      agentInstance.config
+    );
     let response = "";
     for await (const chunk of stream) {
       if ("agent" in chunk) response += chunk.agent.messages[0].content;
@@ -96,11 +108,14 @@ app.post("/autonomous", async (req, res) => {
     while (true) {
       try {
         const thought = "Execute an interesting on-chain action.";
-        const stream = await agentInstance.agent.stream({ messages: [new HumanMessage(thought)] }, agentInstance.config);
+        const stream = await agentInstance.agent.stream(
+          { messages: [new HumanMessage(thought)] },
+          agentInstance.config
+        );
         for await (const chunk of stream) {
           console.log(chunk.agent?.messages[0].content || chunk.tools?.messages[0].content);
         }
-        await new Promise(resolve => setTimeout(resolve, interval * 1000));
+        await new Promise((resolve) => setTimeout(resolve, interval * 1000));
       } catch (error) {
         console.error("Error in autonomous mode:", error.message);
         break;
