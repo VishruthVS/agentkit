@@ -122,15 +122,19 @@ async function initializeAgent() {
       tools,
       checkpointSaver: memory,
       messageModifier: `
-        You are a helpful agent that can interact onchain using the Coinbase Developer Platform AgentKit. You are 
-        empowered to interact onchain using your tools. If you ever need funds, you can request them from the 
-        faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet details and request 
-        funds from the user. Before executing your first action, get the wallet details to see what network 
-        you're on. If there is a 5XX (internal) HTTP error code, ask the user to try again later. If someone 
-        asks you to do something you can't do with your currently available tools, you must say so, and 
-        encourage them to implement it themselves using the CDP SDK + Agentkit, recommend they go to 
-        docs.cdp.coinbase.com for more information. Be concise and helpful with your responses. Refrain from 
-        restating your tools' descriptions unless it is explicitly requested.
+       You are a helpful agent that can interact on-chain using the Coinbase Developer Platform AgentKit. 
+        You are empowered to interact on-chain using your tools. If you ever need funds, you can request them from 
+        the faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet details and request 
+        funds from the user. Before executing your first action, get the wallet details to see what network you're on. 
+        If there is a 5XX (internal) HTTP error code, ask the user to try again later. If someone asks you to do 
+        something you can't do with your currently available tools, you must say so, and encourage them to implement 
+        it themselves using the CDP SDK + Agentkit, recommending they go to docs.cdp.coinbase.com for more information. 
+        Be concise and helpful with your responses. Refrain from restating your tools' descriptions unless it is 
+        explicitly requested.
+
+        Additionally, you have the ability to fetch real-time token prices using Pyth. 
+        If a user asks for token prices, you can fetch the price from the Pyth price feed. 
+        Use the correct price feed ID for the requested token and ensure the response is accurate and clear.
         `,
     });
 
@@ -146,6 +150,21 @@ async function initializeAgent() {
 }
 
 /**
+ * Fetch real-time price data from Pyth using a specified price feed ID
+ *
+ * @param pyth - Pyth action provider
+ * @param priceFeedID - The Pyth price feed ID to fetch the data for
+ */
+async function fetchPythPrice(pyth: any, priceFeedID: string) {
+  try {
+    const price = await pyth.fetchPrice({ priceFeedID });
+    console.log(`Fetched Pyth price: ${JSON.stringify(price, null, 2)}`);
+  } catch (error) {
+    console.error("Error fetching Pyth price:", error);
+  }
+}
+
+/**
  * Run the agent autonomously with specified intervals
  *
  * @param agent - The agent executor
@@ -153,12 +172,16 @@ async function initializeAgent() {
  * @param interval - Time interval between actions in seconds
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function runAutonomousMode(agent: any, config: any, interval = 10) {
+async function runAutonomousMode(agent: any, config: any, pyth: any, interval = 10) {
   console.log("Starting autonomous mode...");
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
+      // Fetch Pyth price during autonomous mode
+      const priceFeedID = "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace";
+      await fetchPythPrice(pyth, priceFeedID);
+
       const thought =
         "Be creative and do something interesting on the blockchain. " +
         "Choose an action or set of actions and execute it that highlights your abilities.";
@@ -278,20 +301,11 @@ async function main() {
     if (mode === "chat") {
       await runChatMode(agent, config);
     } else {
-      await runAutonomousMode(agent, config);
+     //await runAutonomousMode(agent, config, agent.pythActionProvider, 10);
     }
   } catch (error) {
-    if (error instanceof Error) {
-      console.error("Error:", error.message);
-    }
-    process.exit(1);
+    console.error("Error during agent initialization:", error);
   }
 }
 
-if (require.main === module) {
-  console.log("Starting Agent...");
-  main().catch(error => {
-    console.error("Fatal error:", error);
-    process.exit(1);
-  });
-}
+main();
